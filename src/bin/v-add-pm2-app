@@ -1,0 +1,73 @@
+#!/bin/bash
+# info: add web to PM2
+# options: USER DOMAIN ENTRYPOINT
+#
+# example: v-add-pm2-app admin wonderland.com ecosystem.config.js
+#
+# This function adds an installed app to pm2
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+entrypoint=$3
+
+# Includes
+source /etc/hestiacp/hestia.conf
+source $HESTIA/func/main.sh
+source $HESTIA/func/domain.sh
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Additional argument formatting
+format_domain
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN ENTRYPOINT'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_package_full 'WEB_DOMAINS'
+
+is_dir_symlink "$HOMEDIR/$user/web"
+is_dir_symlink "$HOMEDIR/$user/web/$domain"
+
+is_base_domain_owner "$domain"
+
+check_hestia_demo_mode
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+nodeapp_dir="$HOMEDIR/$user/web/$domain/private/nodeapp"
+
+if [ -f "$nodeapp_dir/$entrypoint" ]; then
+	# Load NVM if available
+	if [ -f /opt/nvm/nvm.sh ]; then
+		export NVM_DIR="/opt/nvm"
+		source "$NVM_DIR/nvm.sh"
+	fi
+
+	# Install npm dependencies if needed (as user, not root)
+	if [ -f "$nodeapp_dir/package.json" ] && [ ! -d "$nodeapp_dir/node_modules" ]; then
+		runuser -l "$user" -c "export NVM_DIR=/opt/nvm && source /opt/nvm/nvm.sh && cd \"$nodeapp_dir\" && npm install"
+	fi
+
+	runuser -l "$user" -c "pm2 delete \"$domain\" 2>/dev/null"
+	runuser -l "$user" -c "pm2 start \"$nodeapp_dir/$entrypoint\""
+	runuser -l "$user" -c "pm2 save"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "$user" "Info" "Web" "Added web to PM2 (Name: $domain)."
+log_event "$OK" "$ARGUMENTS"
+
+exit
